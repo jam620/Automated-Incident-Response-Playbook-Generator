@@ -1,6 +1,24 @@
 # From Hours to Seconds: Meet the Gemini-Powered Automated IR Playbook Generator  
 A Free, Open-Source Tool Every Blue Team Needs in 2026
 
+---
+
+## 📝 Credits & Version Information
+
+**Original Author:** [rod-trent](https://github.com/rod-trent)  
+**Original Repository:** https://github.com/rod-trent/JunkDrawer/tree/main/Automated%20Incident%20Response%20Playbook%20Generator
+
+**Updated Version:** Migrated from Grok (xAI) to Google Gemini API  
+**Updated by:** Using Cursor AI  
+**Changes:**
+- ✅ Migrated from Grok API to Google Gemini API
+- ✅ Added automatic rate limit handling with exponential backoff
+- ✅ Improved error messages and quota information
+- ✅ Set `gemini-1.5-flash` as default (best for free tier)
+- ✅ Added quota information panel in sidebar
+
+---
+
 I just built something that legitimately made my jaw drop the first time I used it.
 
 You paste a messy incident summary — "LockBit hit 400 endpoints, Cobalt Strike beacons, LSASS dumps, EDR blinded" — and 15 seconds later you get a complete, enterprise-grade, MITRE-mapped incident response playbook with a beautiful interactive flowchart.
@@ -102,11 +120,26 @@ Things senior IR people think of… but only after hours of stress.
 
 ### Current Features
 
-- Full Google Gemini integration (gemini-2.0-flash-exp / gemini-1.5-pro / gemini-1.5-flash)  
+- Full Google Gemini integration (gemini-1.5-flash / gemini-1.5-pro / gemini-2.0-flash-exp)  
+- **Automatic rate limit handling** with exponential backoff retry logic
+- **Quota information panel** with tips for free tier users
 - Interactive, zoomable Mermaid flowcharts  
 - Chat-based refinement ("Make this for a 5-person team", "Add Splunk SOAR playbooks", "Focus on cloud")  
 - One-click Markdown export  
 - Works completely offline once running (except the API call)
+
+### ⚠️ Important: API Quotas & Rate Limits
+
+**Free Tier Recommendations:**
+- **`gemini-1.5-flash`** (default) - Best for free tier (15 requests/min, 1M tokens/min)
+- `gemini-1.5-pro` - Limited free tier support
+- `gemini-2.0-flash-exp` - May require paid plan
+
+The app automatically handles rate limit errors (429) with exponential backoff retries. If you encounter quota errors:
+1. Use `gemini-1.5-flash` (recommended and set as default)
+2. Check your usage: https://ai.dev/usage?tab=rate-limit
+3. Wait for rate limits to reset (usually 1 minute)
+4. Consider upgrading: https://ai.google.dev/pricing
 
 ### Roadmap (Help Wanted!)
 

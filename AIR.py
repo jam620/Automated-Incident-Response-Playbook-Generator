@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import base64
 import extra_streamlit_components as stx  # Kept for future use, but not needed here
 import time
+import re
 import streamlit.components.v1 as components  # For html rendering
 
 # Load .env
@@ -46,10 +47,30 @@ with st.sidebar:
 
     selected_model = st.selectbox(
         "Gemini Model",
-        ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"],
-        index=0
+        ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"],
+        index=0,
+        help="gemini-1.5-flash is recommended for free tier. gemini-2.0-flash-exp may require paid plan."
     )
 
+    st.markdown("---")
+    
+    # Quota information
+    with st.expander("ℹ️ About API Quotas & Rate Limits"):
+        st.markdown("""
+        **Free Tier Limits:**
+        - `gemini-1.5-flash`: Best for free tier (15 requests/min, 1M tokens/min)
+        - `gemini-1.5-pro`: Limited free tier support
+        - `gemini-2.0-flash-exp`: May require paid plan
+        
+        **If you see quota errors:**
+        - Switch to `gemini-1.5-flash` (recommended for free tier)
+        - Check your usage: https://ai.dev/usage?tab=rate-limit
+        - Wait for rate limit reset (usually 1 minute)
+        - Consider upgrading: https://ai.google.dev/pricing
+        
+        The app will automatically retry with exponential backoff on rate limit errors.
+        """)
+    
     st.markdown("---")
     generate = st.button("Generate Playbook", type="primary", use_container_width=True)
 
@@ -82,8 +103,9 @@ Output in clean Markdown."""
         # Combine system and user prompts for Gemini (Gemini uses a single prompt with system instruction)
         full_prompt = f"{system_prompt}\n\n{user_prompt}"
 
-        # Retry logic
-        for attempt in range(3):
+        # Retry logic with exponential backoff for rate limits
+        max_attempts = 5
+        for attempt in range(max_attempts):
             try:
                 # Initialize the model
                 model = genai.GenerativeModel(
@@ -139,8 +161,45 @@ Output in clean Markdown."""
                 break  # Success
 
             except Exception as e:
-                if attempt == 2:
-                    error_msg = str(e)
+                error_msg = str(e)
+                
+                # Handle rate limit errors (429) with exponential backoff
+                if "429" in error_msg or "quota" in error_msg.lower() or "rate limit" in error_msg.lower():
+                    if attempt < max_attempts - 1:
+                        # Extract retry delay from error if available, otherwise use exponential backoff
+                        retry_delay = min(2 ** attempt * 2, 60)  # Exponential backoff: 2s, 4s, 8s, 16s, max 60s
+                        
+                        # Try to extract retry_delay from error message
+                        if "retry_delay" in error_msg or "retry in" in error_msg.lower():
+                            delay_match = re.search(r'retry.*?(\d+\.?\d*)\s*s', error_msg, re.IGNORECASE)
+                            if delay_match:
+                                retry_delay = float(delay_match.group(1)) + 2  # Add 2s buffer
+                        
+                        st.warning(
+                            f"⚠️ **Rate Limit Exceeded** (Attempt {attempt+1}/{max_attempts})\n\n"
+                            f"Waiting {int(retry_delay)} seconds before retry...\n\n"
+                            "**Tips:**\n"
+                            "- Switch to `gemini-1.5-flash` for better free tier support\n"
+                            "- Check your quota: https://ai.dev/usage?tab=rate-limit\n"
+                            "- Consider upgrading if you need higher limits"
+                        )
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        st.error(
+                            "### Rate Limit Exceeded\n\n"
+                            "**Maximum retries reached. The API quota has been exceeded.**\n\n"
+                            "**Solutions:**\n"
+                            "1. **Switch to `gemini-1.5-flash`** (best for free tier)\n"
+                            "2. **Wait a few minutes** for rate limits to reset\n"
+                            "3. **Check your usage:** https://ai.dev/usage?tab=rate-limit\n"
+                            "4. **Upgrade your plan:** https://ai.google.dev/pricing\n\n"
+                            f"**Error details:** {error_msg[:200]}"
+                        )
+                        st.stop()
+                
+                # Handle other errors
+                elif attempt == max_attempts - 1:
                     if "API_KEY_INVALID" in error_msg or "401" in error_msg:
                         st.error(
                             "### API Key Error\n"
@@ -155,12 +214,12 @@ Output in clean Markdown."""
                             "### Model Not Found\n"
                             f"The model '{selected_model}' is not available.\n\n"
                             "**Available models:**\n"
-                            "- gemini-2.0-flash-exp\n"
+                            "- gemini-1.5-flash (recommended)\n"
                             "- gemini-1.5-pro\n"
-                            "- gemini-1.5-flash\n"
+                            "- gemini-2.0-flash-exp\n"
                         )
                     else:
-                        st.error(f"Failed after 3 attempts: {e}")
+                        st.error(f"Failed after {max_attempts} attempts: {e}")
                     st.stop()
                 else:
                     st.warning(f"Attempt {attempt+1} failed, retrying...")
@@ -184,27 +243,37 @@ if st.session_state.get("refine_mode"):
     st.markdown("### Refine Playbook")
     if prompt := st.chat_input("e.g., Add SOAR steps, Focus on cloud, Make shorter"):
         with st.spinner("Updating..."):
-            try:
-                refine_prompt = f"""Refine the existing IR playbook. Return the full updated version.
+            max_refine_attempts = 3
+            for refine_attempt in range(max_refine_attempts):
+                try:
+                    refine_prompt = f"""Refine the existing IR playbook. Return the full updated version.
 
 Original Playbook:
 {st.session_state.playbook_md}
 
 Refinement Request: {prompt}"""
 
-                model = genai.GenerativeModel(
-                    model_name=selected_model,
-                    generation_config={
-                        "temperature": 0.2,
-                        "max_output_tokens": 8192,
-                    }
-                )
-                
-                response = model.generate_content(refine_prompt)
-                st.session_state.playbook_md = response.text
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error refining playbook: {e}")
+                    model = genai.GenerativeModel(
+                        model_name=selected_model,
+                        generation_config={
+                            "temperature": 0.2,
+                            "max_output_tokens": 8192,
+                        }
+                    )
+                    
+                    response = model.generate_content(refine_prompt)
+                    st.session_state.playbook_md = response.text
+                    st.rerun()
+                except Exception as e:
+                    error_msg = str(e)
+                    if ("429" in error_msg or "quota" in error_msg.lower() or "rate limit" in error_msg.lower()) and refine_attempt < max_refine_attempts - 1:
+                        retry_delay = min(2 ** refine_attempt * 2, 60)
+                        st.warning(f"Rate limit hit. Retrying in {int(retry_delay)} seconds...")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        st.error(f"Error refining playbook: {e}")
+                        break
 
 # Footer
 st.caption("Built with Google Gemini + Streamlit • For blue teams, by blue teams")
